@@ -1,10 +1,9 @@
 use crate::commands::Command;
-use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
 use crate::DB;
 use crate::utils::utils::to_resp_bulk_string;
 
@@ -29,7 +28,15 @@ impl Command for GetCommand {
             let mut db = self.db.lock().await;
             let value = db.get(&key);
             if let Some(value) = value {
-                let resp = to_resp_bulk_string(value.to_string());
+                let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+                if let Some(expires_at) = value.expires_at {
+                    if now > expires_at {
+                        db.remove(&key);
+                        stream.write_all(NOT_FOUND).await.unwrap();
+                        return;
+                    }
+                }
+                let resp = to_resp_bulk_string(value.value.to_string());
                 stream.write_all(resp.as_bytes()).await.unwrap();
             } else {
                 stream.write_all(NOT_FOUND).await.unwrap();

@@ -15,10 +15,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
 lazy_static! {
-    static ref DB: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
+    static ref DB: Mutex<HashMap<String, DbValue>> = Mutex::new(HashMap::new());
 }
 
-const PONG: &[u8] = b"+PONG\r\n";
 #[tokio::main]
 async fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
@@ -70,7 +69,6 @@ async fn parse_command(command: String) -> Result<Box<dyn Command>, String> {
         .collect::<Vec<String>>();
 
     println!("Received {} {:?}", command, args);
-    let db = DB.lock().await;
     match command.to_lowercase().as_str() {
         "ping" => Ok(Box::new(PingCommand::new())),
         "echo" => Ok(Box::new(EchoCommand::new(args))),
@@ -78,4 +76,10 @@ async fn parse_command(command: String) -> Result<Box<dyn Command>, String> {
         "get" => Ok(Box::new(GetCommand::new(args, &DB))),
         _ => Err("Invalid command".to_string())
     }
+}
+
+
+struct DbValue {
+    value: String,
+    expires_at: Option<u128>,
 }
