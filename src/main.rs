@@ -2,11 +2,11 @@ mod commands;
 mod utils;
 
 use crate::commands::{
-    echo_command::EchoCommand,
-    get_command::GetCommand,
-    ping_command::PingCommand,
+    echo_command::EchoCommand, get_command::GetCommand, ping_command::PingCommand,
     set_command::SetCommand,
 };
+use clap::Parser;
+use commands::config_command::ConfigCommand;
 use commands::Command;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
@@ -14,27 +14,39 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
+#[derive(Parser, Debug, Clone)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(long, default_value_t = String::from(""))]
+    dir: String,
+    #[arg(long, default_value_t = String::from(""))]
+    dbfilename: String,
+}
+
 lazy_static! {
     static ref DB: Mutex<HashMap<String, DbValue>> = Mutex::new(HashMap::new());
 }
 
 #[tokio::main]
 async fn main() {
+    let args: Args = Args::parse();
+    println!("Args: {:?}", args);
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
     println!("Listening for connections in port 6379");
     loop {
+        let args = args.clone();
         let (socket, _) = listener.accept().await.unwrap();
-        tokio::spawn(async move { process(socket).await });
+        tokio::spawn(async move { process(socket, &args).await });
     }
 }
 
-async fn process(mut stream: TcpStream) {
+async fn process(mut stream: TcpStream, args: &Args) {
     println!("Accepted new connection!");
     loop {
         let buf = &mut [0; 512];
         let n = match stream.read(buf).await {
-            Ok(n) if n == 0 => return,    // Connection closed
+            Ok(n) if n == 0 => return, // Connection closed
             Ok(n) => n,
             Err(e) => {
                 eprintln!("Failed to read from socket: {}", e);
@@ -43,7 +55,7 @@ async fn process(mut stream: TcpStream) {
         };
 
         let read_command = String::from_utf8_lossy(&buf[..n]).to_string();
-        let command = parse_command(read_command).await;
+        let command = parse_command(read_command, args).await;
         if let Ok(mut command) = command {
             command.handle(&mut stream).await;
         } else {
@@ -52,7 +64,7 @@ async fn process(mut stream: TcpStream) {
     }
 }
 
-async fn parse_command(command: String) -> Result<Box<dyn Command>, String> {
+async fn parse_command(command: String, args: &Args) -> Result<Box<dyn Command>, String> {
     println!("Parsing command {}", command);
     let lines: Vec<&str> = command.split("\r\n").collect();
     if lines.len() < 4 {
@@ -60,7 +72,7 @@ async fn parse_command(command: String) -> Result<Box<dyn Command>, String> {
     }
 
     let command = lines[2];
-    let args = lines[3..]
+    let command_args = lines[3..]
         .iter()
         .enumerate()
         .skip(1)
@@ -68,16 +80,20 @@ async fn parse_command(command: String) -> Result<Box<dyn Command>, String> {
         .map(|(_, s)| s.to_string())
         .collect::<Vec<String>>();
 
-    println!("Received {} {:?}", command, args);
+    println!("Received {} {:?}", command, command_args);
     match command.to_lowercase().as_str() {
         "ping" => Ok(Box::new(PingCommand::new())),
-        "echo" => Ok(Box::new(EchoCommand::new(args))),
-        "set" => Ok(Box::new(SetCommand::new(args, &DB))),
-        "get" => Ok(Box::new(GetCommand::new(args, &DB))),
-        _ => Err("Invalid command".to_string())
+        "echo" => Ok(Box::new(EchoCommand::new(command_args))),
+        "set" => Ok(Box::new(SetCommand::new(command_args, &DB))),
+        "get" => Ok(Box::new(GetCommand::new(command_args, &DB))),
+        "config" => Ok(Box::new(ConfigCommand::new(
+            command_args,
+            args.dir.clone(),
+            args.dbfilename.clone(),
+        ))),
+        _ => Err("Invalid command".to_string()),
     }
 }
-
 
 struct DbValue {
     value: String,
