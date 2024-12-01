@@ -1,11 +1,11 @@
 use crate::commands::Command;
+use crate::utils::utils::to_resp_bulk_string;
+use crate::DB;
 use std::future::Future;
 use std::pin::Pin;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use crate::DB;
-use crate::utils::utils::to_resp_bulk_string;
 
 pub struct GetCommand {
     args: Vec<String>,
@@ -14,21 +14,24 @@ pub struct GetCommand {
 
 impl GetCommand {
     pub fn new(args: Vec<String>, db: &'static DB) -> Self {
-        GetCommand {
-            args,
-            db,
-        }
+        GetCommand { args, db }
     }
 }
 const NOT_FOUND: &[u8; 5] = b"$-1\r\n";
 impl Command for GetCommand {
-    fn handle<'a>(&'a mut self, stream: &'a mut TcpStream) -> Pin<Box<dyn Future<Output=()> + Send + '_>> {
+    fn handle<'a>(
+        &'a mut self,
+        stream: &'a mut TcpStream,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
             let key = self.args[0].clone();
             let mut db = self.db.lock().await;
             let value = db.get(&key);
             if let Some(value) = value {
-                let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis();
                 if let Some(expires_at) = value.expires_at {
                     if now > expires_at {
                         db.remove(&key);
@@ -44,3 +47,4 @@ impl Command for GetCommand {
         })
     }
 }
+

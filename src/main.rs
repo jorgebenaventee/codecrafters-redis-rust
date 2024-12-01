@@ -7,6 +7,7 @@ use crate::commands::{
 };
 use clap::Parser;
 use commands::config_command::ConfigCommand;
+use commands::keys_command::KeysCommand;
 use commands::Command;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
@@ -91,6 +92,7 @@ async fn parse_command(command: String, args: &Args) -> Result<Box<dyn Command>,
             args.dir.clone(),
             args.dbfilename.clone(),
         ))),
+        "keys" => Ok(Box::new(KeysCommand::new(command_args, &DB))),
         _ => Err("Invalid command".to_string()),
     }
 }
