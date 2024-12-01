@@ -1,4 +1,5 @@
 mod commands;
+mod persistence;
 mod utils;
 
 use crate::commands::{
@@ -10,6 +11,7 @@ use commands::config_command::ConfigCommand;
 use commands::keys_command::KeysCommand;
 use commands::Command;
 use lazy_static::lazy_static;
+use persistence::rdb_parser::RdbParser;
 use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -30,9 +32,18 @@ lazy_static! {
 
 #[tokio::main]
 async fn main() {
-    let args: Args = Args::parse();
+    let args: &Args = &Args::parse();
     println!("Args: {:?}", args);
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    if !args.dir.trim().is_empty() && !args.dbfilename.trim().is_empty() {
+        let map = RdbParser::parse(args.dir.clone(), args.dbfilename.clone()).await;
+        if let Ok(map) = map {
+            *DB.lock().await = map;
+        } else {
+            let error = map.unwrap_err();
+            println!("Error parsing rdb file: {}", error);
+        }
+    }
 
     println!("Listening for connections in port 6379");
     loop {
@@ -97,6 +108,7 @@ async fn parse_command(command: String, args: &Args) -> Result<Box<dyn Command>,
     }
 }
 
+#[derive(Debug)]
 struct DbValue {
     value: String,
     expires_at: Option<u128>,
