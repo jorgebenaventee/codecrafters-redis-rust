@@ -13,9 +13,11 @@ use commands::Command;
 use lazy_static::lazy_static;
 use persistence::rdb_parser::RdbParser;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
+use tracing::Level;
 
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
@@ -32,10 +34,14 @@ lazy_static! {
 
 #[tokio::main]
 async fn main() {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(Level::TRACE)
+        .init();
     let args: &Args = &Args::parse();
-    println!("Args: {:?}", args);
+    tracing::debug!("{:?}", args);
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
     if !args.dir.trim().is_empty() && !args.dbfilename.trim().is_empty() {
+        tracing::info!("Parsing rdb file");
         let map = RdbParser::parse(args.dir.clone(), args.dbfilename.clone()).await;
         if let Ok(map) = map {
             *DB.lock().await = map;
@@ -45,7 +51,7 @@ async fn main() {
         }
     }
 
-    println!("Listening for connections in port 6379");
+    tracing::info!("Listening for connections in port 6379");
     loop {
         let args = args.clone();
         let (socket, _) = listener.accept().await.unwrap();
