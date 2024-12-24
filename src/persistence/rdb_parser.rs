@@ -15,34 +15,92 @@ impl RdbParser {
         db_filename: String,
     ) -> Result<HashMap<String, DbValue>, &'static str> {
         let file_path = &format!("{}/{}", file_dir, db_filename);
-        let file = File::open(file_path).await;
-        if file.is_err() {
-            tracing::error!("File not found");
-            return Err("File not found");
+        let buffer = RdbParser::read_file(file_path.to_string()).await;
+        let mut map = HashMap::new();
+        if buffer.is_empty() {
+            return Ok(map);
         }
-        tracing::debug!("File path: {:?}", file_path);
-        let mut buf_reader = BufReader::new(file.unwrap());
-        let mut buffer: Vec<u8> = vec![];
-        let _ = buf_reader.read_to_end(&mut buffer).await;
-        tracing::trace!("Buffer: {:?}", buffer);
-        let is_redis = buffer.starts_with(b"REDIS");
-        if !is_redis {
-            tracing::error!("Invalid persistence file");
-            return Err("Invalid persistence file");
-        }
-        let map = HashMap::new();
-        tracing::trace!("Searchinf for FB pos");
-        let fb_pos = buffer.iter().position(|&b| b == 0xFB).unwrap();
-        tracing::trace!("FB pos: {:?}", fb_pos);
+        let fb_pos = RdbParser::get_fb_pos(&buffer);
         let db_size = RdbParser::get_db_size(&buffer, fb_pos);
         tracing::trace!("DB size: {:?}", db_size);
+        let mut value_type_pos = fb_pos + 4;
+        for _ in 0..db_size {
+            println!("\r\n\r\n");
+            tracing::trace!("Value type pos: {:?}", value_type_pos);
+            let key_length_pos = value_type_pos;
+            let type_byte = 0 /*buffer[value_type_pos] We'll assume it is a string for now*/;
+            tracing::trace!("Value type: {:?}", type_byte);
+            let key_length = buffer[key_length_pos];
+            let key = RdbParser::get_key(&buffer, key_length_pos, key_length);
+            tracing::trace!("Key: {:?}", key);
+            let value_length_pos = key_length_pos + key_length as usize + 1;
+            let value_length = buffer[value_length_pos];
+            let value = RdbParser::get_value(&buffer, value_length_pos, value_length);
+            tracing::trace!("Value: {:?}", value);
+            map.insert(
+                key,
+                DbValue {
+                    value,
+                    expires_at: None,
+                },
+            );
+            value_type_pos = value_length_pos + value_length as usize + 2;
+        }
         return Ok(map);
     }
 
-    fn get_db_size(buffer: &[u8], fb_pos: usize) -> u64 {
-        let db_size_bytes = &buffer[fb_pos + 1..fb_pos + 9];
-        tracing::trace!("DB size bytes: {:?}", db_size_bytes);
-        tracing::trace!("DB size bytes in hex: {:02x?}", db_size_bytes);
-        return u64::from_le_bytes(db_size_bytes.try_into().unwrap());
+    fn get_db_size(buffer: &[u8], fb_pos: usize) -> u8 {
+        return buffer[fb_pos + 1];
+    }
+
+    fn get_key(buffer: &[u8], key_length_pos: usize, key_length: u8) -> String {
+        tracing::trace!("Key length: {:?}", key_length as usize);
+        tracing::trace!("Key length pos: {:?}", key_length_pos);
+        tracing::trace!(
+            "Seaching key from pos {:?} to pos {:?}",
+            key_length_pos + 1,
+            key_length_pos + key_length as usize
+        );
+        let key_bytes = &buffer[key_length_pos + 1..=(key_length_pos + key_length as usize)];
+        let key = str::from_utf8(key_bytes).unwrap();
+        return key.to_string();
+    }
+
+    fn get_value(buffer: &[u8], value_length_pos: usize, value_length: u8) -> String {
+        tracing::trace!("Value length: {:?}", value_length);
+        tracing::trace!("Value length pos: {:?}", value_length_pos);
+        tracing::trace!(
+            "Seaching value from pos {:?} to pos {:?}",
+            value_length_pos + 1,
+            value_length_pos + value_length as usize
+        );
+        let value_bytes =
+            &buffer[value_length_pos + 1..(value_length_pos + value_length as usize + 1)];
+        let value = str::from_utf8(value_bytes).unwrap();
+        return value.to_string();
+    }
+
+    async fn read_file(file_path: String) -> Vec<u8> {
+        let file = File::open(file_path).await;
+        if file.is_err() {
+            tracing::error!("File not found");
+            return Vec::new();
+        }
+        let mut buf_reader = BufReader::new(file.unwrap());
+        let mut buffer: Vec<u8> = vec![];
+        let _ = buf_reader.read_to_end(&mut buffer).await;
+        let is_redis = buffer.starts_with(b"REDIS");
+        if !is_redis {
+            tracing::error!("Invalid persistence file");
+            return Vec::new();
+        }
+        return buffer;
+    }
+
+    fn get_fb_pos(buffer: &[u8]) -> usize {
+        tracing::trace!("Searching for FB pos");
+        let fb_pos = buffer.iter().position(|&b| b == 0xFB).unwrap();
+        tracing::trace!("FB pos: {:?}", fb_pos);
+        return fb_pos;
     }
 }
