@@ -1,5 +1,8 @@
 use core::str;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use tokio::{
     fs::File,
@@ -27,8 +30,12 @@ impl RdbParser {
         for _ in 0..db_size {
             println!("\r\n\r\n");
             tracing::trace!("Value type pos: {:?}", value_type_pos);
-            let key_length_pos = value_type_pos;
-            let type_byte = 0 /*buffer[value_type_pos] We'll assume it is a string for now*/;
+            let key_length_pos = if buffer[value_type_pos - 1] == 0xFC {
+                value_type_pos + 9
+            } else {
+                value_type_pos
+            };
+            let type_byte = buffer[value_type_pos];
             tracing::trace!("Value type: {:?}", type_byte);
             let key_length = buffer[key_length_pos];
             let key = RdbParser::get_key(&buffer, key_length_pos, key_length);
@@ -37,20 +44,33 @@ impl RdbParser {
             let value_length = buffer[value_length_pos];
             let value = RdbParser::get_value(&buffer, value_length_pos, value_length);
             tracing::trace!("Value: {:?}", value);
-            map.insert(
-                key,
-                DbValue {
-                    value,
-                    expires_at: None,
-                },
+            tracing::debug!(
+                "Buffer at value_type_pos - 1: 0x{:02x?}",
+                &buffer[value_type_pos - 1]
             );
+            let expires_at: Option<u128> = if buffer[value_type_pos - 1] == 0xFC {
+                let expires_at_vec: Vec<u8> = buffer[value_type_pos..=(value_type_pos + 7)]
+                    .iter()
+                    .map(|&b| b)
+                    .collect();
+                let mut expires_at: u128 = 0;
+                for (i, &byte) in expires_at_vec.iter().enumerate() {
+                    expires_at |= (byte as u128) << (i * 8);
+                }
+                tracing::trace!("Expires at vec: {:?}", expires_at_vec);
+                tracing::trace!("Expires at: {:?}", expires_at);
+                Some(expires_at as u128)
+            } else {
+                None
+            };
+            map.insert(key, DbValue { value, expires_at });
             value_type_pos = value_length_pos + value_length as usize + 2;
         }
-        return Ok(map);
+        Ok(map)
     }
 
     fn get_db_size(buffer: &[u8], fb_pos: usize) -> u8 {
-        return buffer[fb_pos + 1];
+        buffer[fb_pos + 1]
     }
 
     fn get_key(buffer: &[u8], key_length_pos: usize, key_length: u8) -> String {
@@ -63,7 +83,7 @@ impl RdbParser {
         );
         let key_bytes = &buffer[key_length_pos + 1..=(key_length_pos + key_length as usize)];
         let key = str::from_utf8(key_bytes).unwrap();
-        return key.to_string();
+        key.to_string()
     }
 
     fn get_value(buffer: &[u8], value_length_pos: usize, value_length: u8) -> String {
@@ -77,7 +97,7 @@ impl RdbParser {
         let value_bytes =
             &buffer[value_length_pos + 1..(value_length_pos + value_length as usize + 1)];
         let value = str::from_utf8(value_bytes).unwrap();
-        return value.to_string();
+        value.to_string()
     }
 
     async fn read_file(file_path: String) -> Vec<u8> {
@@ -94,13 +114,13 @@ impl RdbParser {
             tracing::error!("Invalid persistence file");
             return Vec::new();
         }
-        return buffer;
+        buffer
     }
 
     fn get_fb_pos(buffer: &[u8]) -> usize {
         tracing::trace!("Searching for FB pos");
         let fb_pos = buffer.iter().position(|&b| b == 0xFB).unwrap();
         tracing::trace!("FB pos: {:?}", fb_pos);
-        return fb_pos;
+        fb_pos
     }
 }
