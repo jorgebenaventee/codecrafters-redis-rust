@@ -26,6 +26,8 @@ struct Args {
     dir: String,
     #[arg(long, default_value_t = String::from(""))]
     dbfilename: String,
+    #[arg(long, default_value_t = 6379)]
+    port: u16,
 }
 
 lazy_static! {
@@ -39,7 +41,9 @@ async fn main() {
         .init();
     let args: &Args = &Args::parse();
     tracing::debug!("{:?}", args);
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", args.port))
+        .await
+        .unwrap();
     if !args.dir.trim().is_empty() && !args.dbfilename.trim().is_empty() {
         tracing::info!("Parsing rdb file");
         let map = RdbParser::parse(args.dir.clone(), args.dbfilename.clone()).await;
