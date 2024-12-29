@@ -29,6 +29,8 @@ struct Args {
     dbfilename: String,
     #[arg(long, default_value_t = 6379)]
     port: u16,
+    #[arg(long, default_value_t = String::from(""))]
+    replicaof: String,
 }
 
 lazy_static! {
@@ -115,7 +117,10 @@ async fn parse_command(command: String, args: &Args) -> Result<Box<dyn Command>,
             args.dbfilename.clone(),
         ))),
         "keys" => Ok(Box::new(KeysCommand::new(command_args, &DB))),
-        "info" => Ok(Box::new(InfoCommand::new(command_args))),
+        "info" => Ok(Box::new(InfoCommand::new(
+            command_args,
+            args.replicaof.clone(),
+        ))),
         _ => Err("Invalid command".to_string()),
     }
 }
